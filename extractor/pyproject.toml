@@ -1,5 +1,5 @@
 [project]
-name = "github-activity-pipeline"
+name = "extractor"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -7,6 +7,8 @@ requires-python = ">=3.14"
 dependencies = [
     "dotenv>=0.9.9",
     "duckdb>=1.5.2",
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
     "notebook>=7.5.6",
     "pygithub>=2.9.1",
 ]
