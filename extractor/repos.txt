@@ -1,0 +1,7 @@
+https://github.com/donnemartin/system-design-primer
+
+https://github.com/langchain-ai/langchain
+
+https://github.com/supabase/supabase
+
+https://github.com/dbeaver/dbeaver
