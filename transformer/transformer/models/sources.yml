@@ -1,0 +1,16 @@
+version: 1
+
+sources:
+  - name: github_activity_raw
+    schema: main
+    tables:
+      - name: repos
+        description: "Stored repositories data from GitHub API"
+      - name: commits
+        description: "Stored commits data from GitHub API"
+      - name: issues
+        description: "Stored issues, including pull requests, data from GitHub API"
+      - name: num_of_forks
+        description: "Stored number, per day, of forks for each repository from GitHub API"
+      - name: stars
+        description: "Stored number, per day, of stars for each repository from GitHub API"
