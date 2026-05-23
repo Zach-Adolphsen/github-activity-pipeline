@@ -6,31 +6,64 @@ from github import Auth, Github
 import datetime as dt
 from tqdm import tqdm
 
-#
+#=================================================================
 #   Load environment variables and authenticate with GitHub API
-#
+#=================================================================
 load_dotenv()
 auth = Auth.Token(os.getenv("GITHUB_ACCESS_TOKEN"))
-
-g = Github(auth=auth)
 
 g = Github(base_url="https://api.github.com", auth=auth)
 
 # Create database connection
 con = duckdb.connect("github_activity_pipeline.db")
 
-repos_to_load = ["donnemartin/system-design-primer", 
-                 "langchain-ai/langchain", 
-                 "supabase/supabase", 
-                 "dbeaver/dbeaver",
-                 "microsoft/vscode"]
+repos_to_load = ["donnemartin/system-design-primer",
+                #  "supabase/supabase",
+                "psf/black"
+                ]
 
-for repo_url in tqdm(repos_to_load, desc="Repos", unit="repo"):
+def get_issue_rows(repo, repo_id):
+        issues_iter = repo.get_issues(state="all")
+        issues_total = getattr(issues_iter, "totalCount", None)
+        for issue in tqdm(issues_iter, desc=f"Issues for {repo_name}", total=issues_total, unit=" issue"):
+            if issue.pull_request is None:
+                yield (
+                    repo_id,
+                    issue.title,
+                    False,  # is_pull_request
+                    issue.state,
+                    issue.created_at,
+                    issue.closed_at,
+                )
+            else:
+                yield (
+                    repo_id,
+                    issue.title,
+                    True,  # is_pull_request
+                    issue.state,
+                    issue.created_at,
+                    issue.closed_at,
+                )
+
+def get_commit_rows(repo, repo_id):
+        commits_iter = repo.get_commits()
+        commits_total = getattr(commits_iter, "totalCount", None)
+        for c in tqdm(commits_iter, desc=f"Commits for {repo_name}", total=commits_total, unit=" commit"):
+            author = c.commit.author.name
+            committed_at = c.commit.author.date
+            yield (repo_id, author, committed_at)
+
+
+for repo_url in tqdm(repos_to_load, desc="Repos", unit=" repo"):
+    con.execute("BEGIN TRANSACTION")
+    
+    rate = g.get_rate_limit().rate
+    print(f"Rate limit: {rate.remaining}/{rate.limit} resets at {rate.reset}")
     print(f"Loading data for repo: {repo_url}")
     
-    #
+    #=================================================================
     #   Get repo name and load into database
-    #
+    #=================================================================
     print(f"Getting repo information for {repo_url}...")
     repo = g.get_repo(repo_url)
     repo_name = repo.name
@@ -51,71 +84,41 @@ for repo_url in tqdm(repos_to_load, desc="Repos", unit="repo"):
         ).fetchone()[0]
 
     con.table("repos").show()
-
-    #
+    
+    #=================================================================
     #   Get repo commits and load into database
-    #
+    #=================================================================
     print(f"Getting commits for {repo_url}...")
-    commits = repo.get_commits()
-    commits_total = getattr(commits, "totalCount", None)
 
-    for c in tqdm(commits, desc=f"Commits for {repo_name}", total=commits_total, unit="commit"):
-        author = c.commit.author.name
-        committed_at = c.commit.author.date
-
-        con.execute(
-            """
-                INSERT OR IGNORE INTO commits (repo_id, author, committed_at) VALUES (?, ?, ?)       
-            """,
-            [repo_id, author, committed_at],
-        )
+    con.executemany(
+        """
+            INSERT OR IGNORE INTO commits (repo_id, author, committed_at) VALUES (?, ?, ?)       
+        """,
+        get_commit_rows(repo, repo_id)
+    )
 
     con.table("commits").show()
 
-    #
+    #=================================================================
     #    Get forks and load into database
-    #
+    #=================================================================
     print(f"Getting forks for {repo_url}...")
-    forks = repo.get_forks()
-    num_of_forks = forks.totalCount
+    num_of_forks = repo.forks_count
     print(f"Number of forks: {num_of_forks}")
 
     con.execute(
         """
-        INSERT OR IGNORE INTO num_of_forks (repo_id, num_of_forks) VALUES (?, ?)
+            INSERT OR IGNORE INTO num_of_forks (repo_id, num_of_forks) VALUES (?, ?)
         """,
         [repo_id, num_of_forks],
     )
 
     con.table("num_of_forks").show()
 
-    #
+    #=================================================================
     #    Get repo issues (including pull requests) and load into database
-    #
+    #=================================================================
     print(f"Getting issues for {repo_url}...")
-    def get_issue_rows(repo, repo_id):
-        issues_iter = repo.get_issues(state="all")
-        issues_total = getattr(issues_iter, "totalCount", None)
-        for issue in tqdm(issues_iter, desc=f"Issues for {repo_name}", total=issues_total, unit="issue"):
-            if issue.pull_request is None:
-                yield (
-                    repo_id,
-                    issue.title,
-                    False,  # is_pull_request
-                    issue.state,
-                    issue.created_at,
-                    issue.closed_at,
-                )
-            else:
-                yield (
-                    repo_id,
-                    issue.title,
-                    True,  # is_pull_request
-                    issue.state,
-                    issue.created_at,
-                    issue.closed_at,
-                )
-
 
     con.executemany(
         """
@@ -128,9 +131,9 @@ for repo_url in tqdm(repos_to_load, desc="Repos", unit="repo"):
     con.table("issues").show()
 
 
-    #
+    #=================================================================
     #    Get repo stars and load into database
-    #
+    #=================================================================
     print(f"Getting stars for {repo_url}...")
     num_stars = repo.stargazers_count
 
@@ -146,7 +149,9 @@ for repo_url in tqdm(repos_to_load, desc="Repos", unit="repo"):
 
     # Update repo table with last_updated timestamp and close connection
     con.execute("UPDATE repos SET last_updated = ? WHERE id = ?",
-        [dt.datetime.now(), repo_id],
+        [dt.datetime.date(dt.datetime.now()), repo_id],
     )
+
+    con.execute("COMMIT")
 
 con.close()
